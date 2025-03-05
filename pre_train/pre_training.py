@@ -6,18 +6,21 @@ from torch.utils.data import DataLoader
 import losses
 import numpy as np
 from tqdm import tqdm
+import json
 
-
-# Setting
 if torch.cuda.is_available():
     device = 'cuda'
 else:
     device = 'cpu'
-batch_size = 32
-backbone = 'resnet18'
-h5_data_path = r"D:\code_zongheng\foundation_model\saved_data\pair_segments"
-lr = 1e-4
-epochs = 20
+
+# Setting
+with open("../setting.json", "r") as f:
+    setting = json.load(f)
+batch_size = setting["batch_size"]
+backbone = setting["backbone"]
+h5_data_path = setting["h5_data_path"]
+lr = setting["lr"]
+epochs = setting["epochs"]
 
 
 # Backbone Model
