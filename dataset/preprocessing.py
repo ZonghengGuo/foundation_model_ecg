@@ -10,7 +10,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor
 import os
 import scipy.signal as signal
-import matlab.engine
+import subprocess
 
 
 # Setting
@@ -36,13 +36,35 @@ def is_nan_ratio_exceed(sig, threshold):
     return nan_ratio > threshold # tell if reach the limit
 
 # Quality assessment
-def call_rrSQI(ecg_signal, eng):
-    ecg_resampled = signal.resample_poly(ecg_signal, up=8, down=5)
-    ecg_matlab = matlab.double(ecg_resampled.tolist())
-    r_peaks = eng.QRS(ecg_matlab, float(200))
-    r = eng.rrSQI(ecg_matlab, r_peaks, 200.0)
-    r_val = float(r)
-    return r_val
+# def call_rrSQI(ecg_signal):
+#     ecg_resampled = signal.resample_poly(ecg_signal, up=8, down=5)
+#
+#     # save ecg_signal as txt
+#     ecg_file = 'ecg_signal.txt'
+#     np.savetxt(ecg_file, ecg_resampled, fmt='%.6f')
+#
+#     # use QRS to process ecg signal
+#     qrs_output = 'qrs_output.txt'
+#     subprocess.run(['QRS.exe', ecg_file, '200', qrs_output], check=True)
+#
+#     # read the output of QRS.exe
+#     with open(qrs_output, 'r') as f:
+#         r_peaks = f.read().strip()
+#
+#     # use rrSQI.exe to process the output of QRS.exe
+#     rrsqi_output = 'rrsqi_output.txt'
+#     subprocess.run(['rrSQI.exe', ecg_file, r_peaks, '200.0', rrsqi_output], check=True)
+#
+#     # read the quality output from rrSQI.exe
+#     with open(rrsqi_output, 'r') as f:
+#         r_val = float(f.read().strip())
+#
+#     # clear
+#     os.remove(ecg_file)
+#     os.remove(qrs_output)
+#     os.remove(rrsqi_output)
+#
+#     return r_val
 
 # Downsample signals
 def downsample(signal_data, fs_orig, fs_new):
@@ -73,7 +95,7 @@ def set_nan_to_zero(sig):
 
 # Select the suitable segments with 'II' lead and time length > f{"shortest_minutes"}
     # index record data path
-def process_record(record, eng):
+def process_record(record):
     record_name = record.name
     record_path = posixpath.join(database_name, record.parent, record_name)
 
@@ -128,7 +150,7 @@ def process_record(record, eng):
                 continue
 
             # quality assessment
-            qua = call_rrSQI(slide_segment, eng)
+            qua = call_rrSQI(slide_segment)
             qua_labels.append(qua)
             print(f"The quality of ECG segment in {str(record.parent)}/{str(record.name)}.npy is: {(qua * 100):.2f}%")
 
@@ -152,22 +174,22 @@ def process_record(record, eng):
         print(f"save segments into: {segment_save_path}.npy and qualities into {quality_save_path}.npy" )
 
 
-async def async_process_records(records, eng):
+async def async_process_records(records):
     print(f"Using {os.cpu_count()} cpu cores for synchronous programming and multi-threaded pool processing")
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
         loop = asyncio.get_event_loop()
         tasks = []
         with tqdm(total=len(records), desc="Processing records") as pbar:
             for record in records:
-                task = loop.run_in_executor(pool, process_record, record, eng)
+                task = loop.run_in_executor(pool, process_record, record)
                 task.add_done_callback(lambda _: pbar.update())
                 tasks.append(task)
 
             await asyncio.gather(*tasks)
 
 
-async def main(records, eng):
-    await async_process_records(records, eng)
+async def main(records):
+    await async_process_records(records)
 
 
 if __name__ == '__main__':
@@ -182,12 +204,5 @@ if __name__ == '__main__':
     records = [PurePosixPath(record) for record in sequent_records]
     print(f"Loaded {len(records)} records from the '{database_name}' database.")
 
-    # Start MATLAB engine
-    eng = matlab.engine.start_matlab()
-    eng.addpath('dataset', nargout=0)
-
     # Data preprocessing and quality assessment
-    asyncio.run(main(records, eng))
-
-    # Close the MATLAB engine
-    eng.quit()
+    asyncio.run(main(records))
