@@ -1,0 +1,11 @@
+{
+  "database": "mimic3wdb",
+  "shortest_minutes": 5,
+  "required_sigs": ["II"],
+  "segment_save_path": "saved_data/ecg_segments",
+  "segment_second": 30,
+  "nan_limit": 0.2,
+  "original_fs": 125,
+  "target_fs": 40,
+  "qua_save_path":"saved_data/quality_labels"
+}

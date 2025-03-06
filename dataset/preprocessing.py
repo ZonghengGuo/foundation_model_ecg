@@ -1,17 +1,48 @@
 from pathlib import PurePosixPath
 import wfdb
 from tqdm import tqdm
-import random
 import posixpath
 import numpy as np
 from scipy.signal import resample_poly
 from fractions import Fraction
+import json
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+import os
+import scipy.signal as signal
+import matlab.engine
+
+
+# Setting
+with open("dataset/preprocessing_setting.json", "r") as f:
+    setting = json.load(f)
+
+# Setting parameters
+database_name = setting["database"]
+required_sigs = setting["required_sigs"]  # we select the longest lead: 'II'
+shortest_minutes = setting["shortest_minutes"]
+req_seg_duration = shortest_minutes * 60
+seg_save_path = setting["segment_save_path"]
+qua_save_path = setting["qua_save_path"]
+slide_segment_time = setting["segment_second"]  # ~ seconds window size
+nan_limit = setting["nan_limit"]
+original_fs = setting["original_fs"]  # mimic3wfdb ecg fs
+target_fs = setting["target_fs"]  # downsample fs
 
 
 # Preprocessing function
 def is_nan_ratio_exceed(sig, threshold):
     nan_ratio = np.isnan(sig).sum() / 3750  # count nan value
     return nan_ratio > threshold # tell if reach the limit
+
+# Quality assessment
+def call_rrSQI(ecg_signal, eng):
+    ecg_resampled = signal.resample_poly(ecg_signal, up=8, down=5)
+    ecg_matlab = matlab.double(ecg_resampled.tolist())
+    r_peaks = eng.QRS(ecg_matlab, float(200))
+    r = eng.rrSQI(ecg_matlab, r_peaks, 200.0)
+    r_val = float(r)
+    return r_val
 
 # Downsample signals
 def downsample(signal_data, fs_orig, fs_new):
@@ -40,32 +71,9 @@ def set_nan_to_zero(sig):
     zero_segment = np.nan_to_num(sig, nan=0.0)
     return zero_segment
 
-
-# Setting parameters
-database_name = 'mimic3wdb'
-required_sigs = ['II'] # we select the longest lead: 'II'
-shortest_minutes = 5
-req_seg_duration = shortest_minutes*60
-save_path = "D:/code_zongheng/foundation_model/saved_data/ecg_segments" # Todo
-slide_segment_time = 30 # 30 seconds window size
-nan_limit = 0.2
-random.seed(42)
-max_records_to_load = 1
-original_fs = 125 # mimic3wfdb ecg fs
-target_fs = 40 # downsample fs
-
-# Get the database and records
-subjects = wfdb.get_record_list(database_name)
-print(f"The '{database_name}' database contains data from {len(subjects)} subjects")
-all_records = wfdb.get_record_list(database_name)
-random_records = random.sample(all_records, max_records_to_load)
-records = [PurePosixPath(record) for record in random_records]
-print(f"Loaded {len(records)} random records from the '{database_name}' database.")
-print(records[0])
-
 # Select the suitable segments with 'II' lead and time length > f{"shortest_minutes"}
-for record in tqdm(records):
     # index record data path
+def process_record(record, eng):
     record_name = record.name
     record_path = posixpath.join(database_name, record.parent, record_name)
 
@@ -74,7 +82,7 @@ for record in tqdm(records):
         record_data = wfdb.rdheader(record_name, pn_dir=record_path, rd_segments=True)
     except FileNotFoundError:
         print(f"Record {record_name} not found, skipping...")
-        continue
+        return
 
     # index segments according to the record data path
     segments = record_data.seg_name
@@ -107,6 +115,7 @@ for record in tqdm(records):
         fs = seg_sig.fs
         slide_segment_length = slide_segment_time * fs
         slide_segments = []
+        qua_labels = []
 
         # divide into 30 sec, and discard the last slide (<30s)
         for start in range(0, len(ecg_seg_sig) - slide_segment_length + 1, slide_segment_length):
@@ -118,6 +127,11 @@ for record in tqdm(records):
                 print(f"too much missing value, nan ratio is {((np.isnan(slide_segment).sum() / 3750) * 100):.2f}%")
                 continue
 
+            # quality assessment
+            qua = call_rrSQI(slide_segment, eng)
+            qua_labels.append(qua)
+            print(f"The quality of ECG segment in {str(record.parent)}/{str(record.name)}.npy is: {(qua * 100):.2f}%")
+
             # downsample, set nan as zero then normalize
             slide_segment = downsample(slide_segment, original_fs, target_fs)
             slide_segment = set_nan_to_zero(slide_segment)
@@ -125,5 +139,55 @@ for record in tqdm(records):
 
             slide_segments.append(slide_segment)
 
-        # save the segments list
-        np.save((save_path + '/' + segment), slide_segments)
+        # save the segments and qualities list
+        segment_save_path = seg_save_path + '/' + str(record.parent) + '/' + str(record.name) + '/' + segment
+        os.makedirs(os.path.dirname(segment_save_path), exist_ok=True)
+
+        quality_save_path = qua_save_path + '/' + str(record.parent) + '/' + str(record.name) + '/' + segment
+        os.makedirs(os.path.dirname(quality_save_path), exist_ok=True)
+
+        np.save(segment_save_path, slide_segments)
+        np.save(quality_save_path, qua_labels)
+
+        print(f"save segments into: {segment_save_path}.npy and qualities into {quality_save_path}.npy" )
+
+
+async def async_process_records(records, eng):
+    print(f"Using {os.cpu_count()} cpu cores for synchronous programming and multi-threaded pool processing")
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
+        loop = asyncio.get_event_loop()
+        tasks = []
+        with tqdm(total=len(records), desc="Processing records") as pbar:
+            for record in records:
+                task = loop.run_in_executor(pool, process_record, record, eng)
+                task.add_done_callback(lambda _: pbar.update())
+                tasks.append(task)
+
+            await asyncio.gather(*tasks)
+
+
+async def main(records, eng):
+    await async_process_records(records, eng)
+
+
+if __name__ == '__main__':
+    min_records_to_load = 0
+    max_records_to_load = 100
+
+    # Get the database and records
+    subjects = wfdb.get_record_list(database_name)
+    print(f"The '{database_name}' database contains data from {len(subjects)} subjects")
+    all_records = wfdb.get_record_list(database_name)
+    sequent_records = all_records[min_records_to_load: max_records_to_load]
+    records = [PurePosixPath(record) for record in sequent_records]
+    print(f"Loaded {len(records)} records from the '{database_name}' database.")
+
+    # Start MATLAB engine
+    eng = matlab.engine.start_matlab()
+    eng.addpath('dataset', nargout=0)
+
+    # Data preprocessing and quality assessment
+    asyncio.run(main(records, eng))
+
+    # Close the MATLAB engine
+    eng.quit()

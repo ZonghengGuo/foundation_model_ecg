@@ -23,7 +23,6 @@ lr = setting["lr"]
 epochs = setting["epochs"]
 
 
-# Backbone Model
 model = SimSiam(encoder = backbone,projector=True)
 model = model.to(device)
 
