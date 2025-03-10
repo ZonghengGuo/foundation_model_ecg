@@ -9,13 +9,14 @@ import json
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
 import os
-import scipy.signal as signal
-import subprocess
+from rrSQI import rrSQI
+from QRS import peak_detection
 
 
 # Setting
 with open("dataset/preprocessing_setting.json", "r") as f:
     setting = json.load(f)
+
 
 # Setting parameters
 database_name = setting["database"]
@@ -34,37 +35,6 @@ target_fs = setting["target_fs"]  # downsample fs
 def is_nan_ratio_exceed(sig, threshold):
     nan_ratio = np.isnan(sig).sum() / 3750  # count nan value
     return nan_ratio > threshold # tell if reach the limit
-
-# Quality assessment
-# def call_rrSQI(ecg_signal):
-#     ecg_resampled = signal.resample_poly(ecg_signal, up=8, down=5)
-#
-#     # save ecg_signal as txt
-#     ecg_file = 'ecg_signal.txt'
-#     np.savetxt(ecg_file, ecg_resampled, fmt='%.6f')
-#
-#     # use QRS to process ecg signal
-#     qrs_output = 'qrs_output.txt'
-#     subprocess.run(['QRS.exe', ecg_file, '200', qrs_output], check=True)
-#
-#     # read the output of QRS.exe
-#     with open(qrs_output, 'r') as f:
-#         r_peaks = f.read().strip()
-#
-#     # use rrSQI.exe to process the output of QRS.exe
-#     rrsqi_output = 'rrsqi_output.txt'
-#     subprocess.run(['rrSQI.exe', ecg_file, r_peaks, '200.0', rrsqi_output], check=True)
-#
-#     # read the quality output from rrSQI.exe
-#     with open(rrsqi_output, 'r') as f:
-#         r_val = float(f.read().strip())
-#
-#     # clear
-#     os.remove(ecg_file)
-#     os.remove(qrs_output)
-#     os.remove(rrsqi_output)
-#
-#     return r_val
 
 # Downsample signals
 def downsample(signal_data, fs_orig, fs_new):
@@ -134,8 +104,7 @@ def process_record(record):
         ecg_seg_sig = seg_sig.p_signal[:, sig_no]
 
         # setting
-        fs = seg_sig.fs
-        slide_segment_length = slide_segment_time * fs
+        slide_segment_length = slide_segment_time * original_fs
         slide_segments = []
         qua_labels = []
 
@@ -150,7 +119,8 @@ def process_record(record):
                 continue
 
             # quality assessment
-            qua = call_rrSQI(slide_segment)
+            peaks = peak_detection(slide_segment, original_fs)
+            qua = rrSQI(slide_segment, peaks, original_fs)
             qua_labels.append(qua)
             print(f"The quality of ECG segment in {str(record.parent)}/{str(record.name)}.npy is: {(qua * 100):.2f}%")
 
@@ -195,6 +165,7 @@ async def main(records):
 if __name__ == '__main__':
     min_records_to_load = 0
     max_records_to_load = 100
+    # total:
 
     # Get the database and records
     subjects = wfdb.get_record_list(database_name)

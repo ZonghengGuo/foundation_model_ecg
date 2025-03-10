@@ -1,5 +1,10 @@
 import numpy as np
 from scipy.signal import detrend
+from QRS import peak_detection
+import wfdb
+import matlab
+import matlab.engine
+import time
 
 
 def rrSQI(ECG, qrs, freq):
@@ -97,9 +102,49 @@ def sample_entropy(signal, m, r, scale):
     # Replace with a proper implementation if needed
     return np.random.random()  # Dummy value
 
-if __name__ == '__main__':
-    input_path = "saved_data/ecg_segments/30/3000003/3000003_0005.npy"
-    segments = np.load(input_path)
-    for segment in segments:
 
-        rrSQI(segment, )
+def call_rrSQI_mat(signal, peaks, fs):
+    eng = matlab.engine.start_matlab()
+    eng.addpath('dataset')
+
+    # 转换数据格式 (Python -> MATLAB)
+    signal_matlab = matlab.double(signal.tolist())
+    peaks_matlab = matlab.double(peaks.tolist())
+    fs_matlab = float(fs)
+
+    # 调用 MATLAB rrSQI 函数
+    r = eng.rrSQI(signal_matlab, peaks_matlab, fs_matlab)
+
+    # 关闭 MATLAB 引擎
+    eng.quit()
+
+    return r
+
+
+if __name__ == '__main__':
+    database_name = 'mimic3wdb'
+    rel_segment_name = '3000003_0005'
+    rel_segment_dir = 'mimic3wdb/30/3000003'
+    segment_data = wfdb.rdrecord(record_name=rel_segment_name, pn_dir=rel_segment_dir)
+    ecg_signal = segment_data.p_signal[:, 0][8000:12000]
+    sampling_rate = segment_data.fs
+
+    r_peaks = peak_detection(ecg_signal, sampling_rate)
+
+    # use python
+    start_time = time.time()
+    _, _, q = rrSQI(ecg_signal, r_peaks, sampling_rate)
+    elapsed_time = time.time() - start_time
+    print(f"the quality of the signal is {q} in rewrite python code")
+    print(f"Execution time of rewrite python code: {elapsed_time:.6f} seconds")
+
+    print("--------------------------------------------")
+
+    # use matlab
+    start_time = time.time()
+    r = call_rrSQI_mat(ecg_signal, r_peaks, sampling_rate)
+    elapsed_time = time.time() - start_time
+    print(f"the quality of the signal is {q} in matlab code")
+    print(f"Execution time of matlab code: {elapsed_time:.6f} seconds")
+
+
