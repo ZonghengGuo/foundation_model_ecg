@@ -2,8 +2,6 @@ import numpy as np
 from scipy.signal import detrend
 from QRS import peak_detection
 import wfdb
-import matlab
-import matlab.engine
 import time
 
 
@@ -22,7 +20,7 @@ def rrSQI(ECG, qrs, freq):
         r (float): Fraction of good beats in RR.
     """
     if len(qrs) < 20 or len(ECG) < 200:
-        return np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([]), 0.0
 
     fs = freq
     timeECG = np.arange(len(ECG)) / fs

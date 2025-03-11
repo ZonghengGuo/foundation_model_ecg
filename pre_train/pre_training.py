@@ -14,7 +14,7 @@ else:
     device = 'cpu'
 
 # Setting
-with open("../setting.json", "r") as f:
+with open("pre_train/pre_training_setting.json", "r") as f:
     setting = json.load(f)
 batch_size = setting["batch_size"]
 backbone = setting["backbone"]

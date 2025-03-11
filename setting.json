@@ -1,8 +1,0 @@
-{
-  "epochs": 30,
-  "lr": 1e-4,
-  "batch_size": 64,
-  "backbone": "ResNet18",
-
-  "h5_input_path": "saved_data/pair_segments",
-}

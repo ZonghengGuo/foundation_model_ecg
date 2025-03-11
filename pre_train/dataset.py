@@ -34,7 +34,7 @@ class SiamDataset:
 
 # Demo
 if __name__ == '__main__':
-    save_path = r"D:\code_zongheng\foundation_model\saved_data\pair_segments"
+    save_path = "saved_data/pair_segments"
     h5_file = os.path.join(save_path, 'datasets.h5')
     batch_size = 32
 
