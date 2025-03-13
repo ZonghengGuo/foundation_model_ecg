@@ -2,50 +2,58 @@ import torch
 from model import SimSiam
 import os
 from dataset import SiamDataset
-from torch.utils.data import DataLoader
+from torch.utils.data import random_split, DataLoader
 import losses
 import numpy as np
 from tqdm import tqdm
 import json
 
-if torch.cuda.is_available():
-    device = 'cuda'
-else:
-    device = 'cpu'
+device = 'cuda'
 
 # Setting
-with open("pre_train/pre_training_setting.json", "r") as f:
+with open("pre_train/pre_train_setting.json", "r") as f:
     setting = json.load(f)
 batch_size = setting["batch_size"]
 backbone = setting["backbone"]
-h5_data_path = setting["h5_data_path"]
+pair_data_path = setting["pairs_save_path"]
 lr = setting["lr"]
 epochs = setting["epochs"]
-
+ratio_train_val = setting["ratio_train_val"]
+model_save_path = setting["model_save_path"]
 
 model = SimSiam(encoder = backbone,projector=True)
 model = model.to(device)
 
-h5_file = os.path.join(h5_data_path, 'datasets.h5')
-train_dataset = SiamDataset(h5_file)
-print("Total numbers of training pairs:", len(train_dataset))
+dataset = SiamDataset(pair_data_path)
 
-train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-# dataloader_val = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+train_size = int(ratio_train_val * len(dataset))
+val_size = len(dataset) - train_size
+
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+print("Total numbers of training pairs:", len(train_dataset))
+print("Total numbers of validation pairs:", len(val_dataset))
+print("Using the model of:", backbone)
+
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=8)
+val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
 criterion = losses.NegativeCosineSimLoss().to(device)
 
 param_groups = [
     {'params': list(set(model.parameters()))}
 ]
+
 opt = torch.optim.Adam(param_groups, lr=lr)
-scheduler = torch.optim.lr_scheduler.StepLR(opt)
+scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=10, gamma=0.1)
 
 losses_list = []
 
 for epoch in range(0, epochs):
     model.train()
     losses_per_epoch = []
+
+    pbar = tqdm(enumerate(train_dataloader))
 
     for batch_idx, (x1, x2) in tqdm(enumerate(train_dataloader)):
         x1, x2 = x1.to("cuda", dtype=torch.float32), x2.to("cuda", dtype=torch.float32)
@@ -77,7 +85,7 @@ for epoch in range(0, epochs):
 
     with torch.no_grad():
         losses_val = []
-        pbar = tqdm(enumerate(dataloader_val))
+        pbar = tqdm(enumerate(val_dataloader))
         for batch_idx, (x1, x2) in pbar:
             x1, x2 = x1.to(device, dtype=torch.float32), x2.to(device, dtype=torch.float32)
             p1, p2, z1, z2 = model(x1.unsqueeze(dim=1), x2.unsqueeze(dim=1))
@@ -93,4 +101,4 @@ for epoch in range(0, epochs):
         print(f"last loss: {losses_list[-1]} | min loss: {min(losses_list)}")
         # if not os.path.exists('{}'.format(LOG_DIR)):
         #     os.makedirs('{}'.format(LOG_DIR))
-        torch.save({'model_state_dict':model.state_dict()}, '{}/{}_{}_{}_{}_{}.pth'.format(LOG_DIR, args.baseline, args.model, args.sz_embedding, args.loss,epoch))
+        torch.save({'model_state_dict':model.state_dict()}, '{}/{}_.pth'.format(model_save_path, backbone))

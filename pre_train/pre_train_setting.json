@@ -1,10 +1,12 @@
 {
-  "h5_save_path": "saved_data/pair_segments",
+  "pairs_save_path": "saved_data/pair_segments",
   "write_batch_size": 3000,
-  "chunk_size": 1024,
+  "chunk_size": 100000,
 
-  "epochs": 30,
+  "ratio_train_val": 0.9,
+  "epochs": 100,
   "lr": 1e-4,
-  "batch_size": 64,
-  "backbone": "ResNet18"
+  "batch_size": 512,
+  "backbone": "ResNet50",
+  "model_save_path": "saved_data/save_best_model"
 }

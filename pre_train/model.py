@@ -16,7 +16,7 @@ class SimSiam(nn.Module):
     Build a SimSiam model.
     """
 
-    def __init__(self, dim=2048, pred_dim=512, projector=True, predictor=True, single_source_mode=False,
+    def __init__(self, dim=256, pred_dim=64, projector=True, predictor=True, single_source_mode=False,
                  encoder='ResNet18'):
         """
         dim: feature dimension (default: 2048)

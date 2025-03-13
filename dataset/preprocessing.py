@@ -198,8 +198,8 @@ async def main(records):
 
 
 if __name__ == '__main__':
-    min_records_to_load = 0
-    max_records_to_load = 100
+    min_records_to_load = 1000
+    max_records_to_load = 4000
     # total: 67830
 
     # Get the database and records
